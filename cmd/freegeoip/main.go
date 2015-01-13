@@ -25,7 +25,7 @@ var VERSION = "3.0.2"
 var maxmindFile = "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.mmdb.gz"
 
 func main() {
-	addr := flag.String("addr", ":8080", "Address in form of ip:port to listen on")
+	addr := flag.String("addr", ":80", "Address in form of ip:port to listen on")
 	certFile := flag.String("cert", "", "X.509 certificate file")
 	keyFile := flag.String("key", "", "X.509 key file")
 	public := flag.String("public", "", "Public directory to serve at the / endpoint")
