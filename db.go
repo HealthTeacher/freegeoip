@@ -1,4 +1,4 @@
-// Copyright 2009-2014 The freegeoip authors. All rights reserved.
+// Copyright 2009 The freegeoip authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -26,10 +26,13 @@ var (
 	// ErrUnavailable may be returned by DB.Lookup when the database
 	// points to a URL and is not yet available because it's being
 	// downloaded in background.
-	ErrUnavailable = errors.New("No database available")
+	ErrUnavailable = errors.New("no database available")
 
 	// Local cached copy of a database downloaded from a URL.
 	defaultDB = filepath.Join(os.TempDir(), "freegeoip", "db.gz")
+
+	// MaxMindDB is the URL of the free MaxMind GeoLite2 database.
+	MaxMindDB = "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.mmdb.gz"
 )
 
 // DB is the IP geolocation database.
@@ -71,8 +74,9 @@ func Open(dsn string) (db *DB, err error) {
 	return db, nil
 }
 
-// OpenURL creates and initializes a DB from a remote file.
-// It automatically downloads and updates the file in background.
+// OpenURL creates and initializes a DB from a URL.
+// It automatically downloads and updates the file in background, and
+// keeps a local copy on $TMPDIR.
 func OpenURL(url string, updateInterval, maxRetryInterval time.Duration) (db *DB, err error) {
 	db = &DB{
 		file:             defaultDB,
@@ -97,13 +101,9 @@ func (db *DB) watchFile() error {
 	if err != nil {
 		return err
 	}
-	dbdir := filepath.Dir(db.file)
-	_, err = os.Stat(dbdir)
+	dbdir, err := db.makeDir()
 	if err != nil {
-		err = os.MkdirAll(dbdir, 0755)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	go db.watchEvents(watcher)
 	return watcher.Watch(dbdir)
@@ -175,29 +175,21 @@ func (db *DB) setReader(reader *maxminddb.Reader, modtime time.Time) {
 }
 
 func (db *DB) autoUpdate(url string) {
-	var sleep time.Duration
-	var retrying bool
+	backoff := time.Second
 	for {
 		err := db.runUpdate(url)
 		if err != nil {
-			db.sendError(fmt.Errorf("Database update failed: %s", err))
-			if !retrying {
-				retrying = true
-				sleep = 5 * time.Second
-			} else {
-				sleep *= 2
-				if sleep > db.maxRetryInterval {
-					sleep = db.maxRetryInterval
-				}
-			}
+			bs := backoff.Seconds()
+			ms := db.maxRetryInterval.Seconds()
+			backoff = time.Duration(math.Min(bs*math.E, ms)) * time.Second
+			db.sendError(fmt.Errorf("download failed (will retry in %s): %s", backoff, err))
 		} else {
-			retrying = false
-			sleep = db.updateInterval
+			backoff = db.updateInterval
 		}
 		select {
 		case <-db.notifyQuit:
 			return
-		case <-time.After(sleep):
+		case <-time.After(backoff):
 			// Sleep till time for the next update attempt.
 		}
 	}
@@ -215,7 +207,12 @@ func (db *DB) runUpdate(url string) error {
 	if err != nil {
 		return err
 	}
-	return db.renameFile(tmpfile)
+	err = db.renameFile(tmpfile)
+	if err != nil {
+		// Cleanup the tempfile if renaming failed.
+		os.RemoveAll(tmpfile)
+	}
+	return err
 }
 
 func (db *DB) needUpdate(url string) (bool, error) {
@@ -228,8 +225,7 @@ func (db *DB) needUpdate(url string) (bool, error) {
 		return false, err
 	}
 	defer resp.Body.Close()
-	size, err := strconv.Atoi(resp.Header.Get("Content-Length"))
-	if stat.Size() != int64(size) {
+	if stat.Size() != resp.ContentLength {
 		return true, nil
 	}
 	return false, nil
@@ -255,8 +251,24 @@ func (db *DB) download(url string) (tmpfile string, err error) {
 	return tmpfile, nil
 }
 
+func (db *DB) makeDir() (dbdir string, err error) {
+	dbdir = filepath.Dir(db.file)
+	_, err = os.Stat(dbdir)
+	if err != nil {
+		err = os.MkdirAll(dbdir, 0755)
+		if err != nil {
+			return "", err
+		}
+	}
+	return dbdir, nil
+}
+
 func (db *DB) renameFile(name string) error {
 	os.Rename(db.file, db.file+".bak") // Optional, might fail.
+	_, err := db.makeDir()
+	if err != nil {
+		return err
+	}
 	return os.Rename(name, db.file)
 }
 
@@ -318,6 +330,33 @@ func (db *DB) Lookup(addr net.IP, result interface{}) error {
 		return db.reader.Lookup(addr, result)
 	}
 	return ErrUnavailable
+}
+
+// DefaultQuery is the default query used for database lookups.
+type DefaultQuery struct {
+	Continent struct {
+		Names map[string]string `maxminddb:"names"`
+	} `maxminddb:"continent"`
+	Country struct {
+		ISOCode string            `maxminddb:"iso_code"`
+		Names   map[string]string `maxminddb:"names"`
+	} `maxminddb:"country"`
+	Region []struct {
+		ISOCode string            `maxminddb:"iso_code"`
+		Names   map[string]string `maxminddb:"names"`
+	} `maxminddb:"subdivisions"`
+	City struct {
+		Names map[string]string `maxminddb:"names"`
+	} `maxminddb:"city"`
+	Location struct {
+		Latitude  float64 `maxminddb:"latitude"`
+		Longitude float64 `maxminddb:"longitude"`
+		MetroCode uint    `maxminddb:"metro_code"`
+		TimeZone  string  `maxminddb:"time_zone"`
+	} `maxminddb:"location"`
+	Postal struct {
+		Code string `maxminddb:"code"`
+	} `maxminddb:"postal"`
 }
 
 // Close the database.

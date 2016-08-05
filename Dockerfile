@@ -1,10 +1,16 @@
-FROM google/golang
+FROM golang:1.6
 
-ADD . /gopath/src/github.com/HealthTeacher/freegeoip
-WORKDIR /gopath/src/github.com/HealthTeacher/freegeoip/cmd/freegeoip
-RUN go get
-RUN go install
-RUN cp -r public /var/www
+COPY cmd/freegeoip/public /var/www
 
-ENTRYPOINT ["/gopath/bin/freegeoip"]
-CMD ["-public", "/var/www"]
+ADD . /go/src/github.com/healthteacher/freegeoip
+RUN cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && go get && go install
+
+ENTRYPOINT ["/go/bin/freegeoip"]
+
+# CMD instructions:
+# Add  "-use-x-forwarded-for"      if your server is behind a reverse proxy
+# Add  "-public", "/var/www"       to enable the web front-end
+# Add  "-internal-server", "8888"  to enable the pprof+metrics server
+#
+# Example:
+# CMD ["-use-x-forwarded-for", "-public", "/var/www", "-internal-server", "8888"]

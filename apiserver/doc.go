@@ -2,10 +2,5 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package main
-
-import "github.com/healthteacher/freegeoip/apiserver"
-
-func main() {
-	apiserver.Run()
-}
+// Package apiserver provides the freegeoip web server.
+package apiserver
