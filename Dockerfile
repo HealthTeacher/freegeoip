@@ -1,4 +1,4 @@
-FROM golang:1.6
+FROM golang:1.7
 
 COPY cmd/freegeoip/public /var/www
 
@@ -6,6 +6,8 @@ ADD . /go/src/github.com/healthteacher/freegeoip
 RUN cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && go get && go install
 
 ENTRYPOINT ["/go/bin/freegeoip"]
+
+EXPOSE 8080
 
 # CMD instructions:
 # Add  "-use-x-forwarded-for"      if your server is behind a reverse proxy

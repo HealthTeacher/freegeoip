@@ -27,6 +27,7 @@ import (
 	"github.com/go-web/httprl"
 	"github.com/go-web/httprl/memcacherl"
 	"github.com/go-web/httprl/redisrl"
+	newrelic "github.com/newrelic/go-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/cors"
 
@@ -34,9 +35,10 @@ import (
 )
 
 type apiHandler struct {
-	db   *freegeoip.DB
-	conf *Config
-	cors *cors.Cors
+	db    *freegeoip.DB
+	conf  *Config
+	cors  *cors.Cors
+	nrapp newrelic.Application
 }
 
 // NewHandler creates an http handler for the freegeoip server that
@@ -47,7 +49,7 @@ func NewHandler(c *Config) (http.Handler, error) {
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 	cf := cors.New(cors.Options{
-		AllowedOrigins:   []string{c.CORSOrigin},
+		AllowedOrigins:   strings.Split(c.CORSOrigin, ","),
 		AllowedMethods:   []string{"GET"},
 		AllowCredentials: true,
 	})
@@ -82,6 +84,14 @@ func (f *apiHandler) config(mc *httpmux.Config) error {
 			return fmt.Errorf("failed to create rate limiter: %v", err)
 		}
 		mc.Use(rl.Handle)
+	}
+	if f.conf.NewrelicName != "" && f.conf.NewrelicKey != "" {
+		config := newrelic.NewConfig(f.conf.NewrelicName, f.conf.NewrelicKey)
+		app, err := newrelic.NewApplication(config)
+		if err != nil {
+			return fmt.Errorf("failed to create newrelic application: {name: %v, key: %v}", f.conf.NewrelicName, f.conf.NewrelicKey)
+		}
+		f.nrapp = app
 	}
 	return nil
 }
@@ -126,7 +136,13 @@ func (f *apiHandler) metrics(next http.HandlerFunc) http.HandlerFunc {
 type writerFunc func(w http.ResponseWriter, r *http.Request, d *responseRecord)
 
 func (f *apiHandler) register(name string, writer writerFunc) http.HandlerFunc {
-	h := prometheus.InstrumentHandler(name, f.iplookup(writer))
+	var h http.Handler
+	if f.nrapp == nil {
+		h = prometheus.InstrumentHandler(name, f.iplookup(writer))
+	} else {
+		h = prometheus.InstrumentHandler(newrelic.WrapHandle(f.nrapp, name, f.iplookup(writer)))
+	}
+
 	return f.cors.Handler(h).ServeHTTP
 }
 
@@ -266,6 +282,21 @@ func (rr *responseRecord) String() string {
 
 // openDB opens and returns the IP database file or URL.
 func openDB(c *Config) (*freegeoip.DB, error) {
+	// This is a paid product. Get the updates URL.
+	if len(c.UserID) > 0 && len(c.LicenseKey) > 0 {
+		var err error
+		c.DB, err = freegeoip.MaxMindUpdateURL(
+			c.UpdatesHost,
+			c.ProductID,
+			c.UserID,
+			c.LicenseKey,
+		)
+		if err != nil {
+			return nil, err
+		}
+		log.Println("Using updates URL:", c.DB)
+	}
+
 	u, err := url.Parse(c.DB)
 	if err != nil || len(u.Scheme) == 0 {
 		return freegeoip.Open(c.DB)
@@ -283,6 +314,8 @@ func watchEvents(db *freegeoip.DB) {
 		case err := <-db.NotifyError():
 			log.Println("database error:", err)
 			dbEventCounter.WithLabelValues("failed").Inc()
+		case msg := <-db.NotifyInfo():
+			log.Println("database info:", msg)
 		case <-db.NotifyClose():
 			return
 		}
