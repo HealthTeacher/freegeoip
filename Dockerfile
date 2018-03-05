@@ -3,6 +3,7 @@ FROM golang:1.7
 COPY cmd/freegeoip/public /var/www
 
 ADD . /go/src/github.com/healthteacher/freegeoip
+Add  "-use-x-forwarded-for"
 RUN cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && go get && go install
 
 ENTRYPOINT ["/go/bin/freegeoip"]
