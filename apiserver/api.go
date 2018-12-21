@@ -30,6 +30,7 @@ import (
 	newrelic "github.com/newrelic/go-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/cors"
+	"golang.org/x/text/language"
 
 	"github.com/fiorix/freegeoip"
 )
@@ -68,16 +69,17 @@ func NewHandler(c *Config) (http.Handler, error) {
 
 func (f *apiHandler) config(mc *httpmux.Config) error {
 	mc.Prefix = f.conf.APIPrefix
-	if f.conf.PublicDir != "" {
-		mc.NotFound = f.publicDir()
-	}
+	mc.NotFound = newPublicDirHandler(f.conf.PublicDir)
 	if f.conf.UseXForwardedFor {
 		mc.UseFunc(httplog.UseXForwardedFor)
 	}
 	if !f.conf.Silent {
 		mc.UseFunc(httplog.ApacheCombinedFormat(f.conf.accessLogger()))
 	}
-	mc.UseFunc(f.metrics)
+	if f.conf.HSTS != "" {
+		mc.UseFunc(hstsMiddleware(f.conf.HSTS))
+	}
+	mc.UseFunc(clientMetricsMiddleware(f.db))
 	if f.conf.RateLimitLimit > 0 {
 		rl, err := newRateLimiter(f.conf)
 		if err != nil {
@@ -96,40 +98,57 @@ func (f *apiHandler) config(mc *httpmux.Config) error {
 	return nil
 }
 
-func (f *apiHandler) publicDir() http.HandlerFunc {
-	fs := http.FileServer(http.Dir(f.conf.PublicDir))
-	return prometheus.InstrumentHandler("frontend", fs)
+func newPublicDirHandler(path string) http.HandlerFunc {
+	handler := http.NotFoundHandler()
+	if path != "" {
+		handler = http.FileServer(http.Dir(path))
+	}
+	return prometheus.InstrumentHandler("frontend", handler)
 }
 
-func (f *apiHandler) metrics(next http.HandlerFunc) http.HandlerFunc {
+func hstsMiddleware(policy string) httpmux.MiddlewareFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.TLS == nil {
+				return
+			}
+			w.Header().Set("Strict-Transport-Security", policy)
+			next(w, r)
+		}
+	}
+}
+
+func clientMetricsMiddleware(db *freegeoip.DB) httpmux.MiddlewareFunc {
 	type query struct {
 		Country struct {
 			ISOCode string `maxminddb:"iso_code"`
 		} `maxminddb:"country"`
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		next(w, r)
-		// Collect metrics after serving the request.
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			return
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			next(w, r)
+			// Collect metrics after serving the request.
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil {
+				return
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return
+			}
+			if ip.To4() != nil {
+				clientIPProtoCounter.WithLabelValues("4").Inc()
+			} else {
+				clientIPProtoCounter.WithLabelValues("6").Inc()
+			}
+			var q query
+			err = db.Lookup(ip, &q)
+			if err != nil || q.Country.ISOCode == "" {
+				clientCountryCounter.WithLabelValues("unknown").Inc()
+				return
+			}
+			clientCountryCounter.WithLabelValues(q.Country.ISOCode).Inc()
 		}
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return
-		}
-		if ip.To4() != nil {
-			clientIPProtoCounter.WithLabelValues("4").Inc()
-		} else {
-			clientIPProtoCounter.WithLabelValues("6").Inc()
-		}
-		var q query
-		err = f.db.Lookup(ip, &q)
-		if err != nil || q.Country.ISOCode == "" {
-			clientCountryCounter.WithLabelValues("unknown").Inc()
-			return
-		}
-		clientCountryCounter.WithLabelValues(q.Country.ISOCode).Inc()
 	}
 }
 
@@ -209,10 +228,8 @@ type geoipQuery struct {
 }
 
 func (q *geoipQuery) Record(ip net.IP, lang string) *responseRecord {
-	// TODO: parse accept-language value from lang.
-	if q.Country.Names[lang] == "" {
-		lang = "en"
-	}
+	lang = parseAcceptLanguage(lang, q.Country.Names)
+
 	r := &responseRecord{
 		IP:          ip.String(),
 		CountryCode: q.Country.ISOCode,
@@ -229,6 +246,29 @@ func (q *geoipQuery) Record(ip net.IP, lang string) *responseRecord {
 		r.RegionName = q.Region[0].Names[lang]
 	}
 	return r
+}
+
+func parseAcceptLanguage(header string, dbLangs map[string]string) string {
+	// supported languages -- i.e. languages available in the DB
+	matchLangs := []language.Tag{
+		language.English,
+	}
+
+	// parse available DB languages and add to supported
+	for name := range dbLangs {
+		matchLangs = append(matchLangs, language.Raw.Make(name))
+	}
+
+	var matcher = language.NewMatcher(matchLangs)
+
+	// parse header
+	t, _, _ := language.ParseAcceptLanguage(header)
+	// match most acceptable language
+	tag, _, _ := matcher.Match(t...)
+	// extract base language
+	base, _ := tag.Base()
+
+	return base.String()
 }
 
 func roundFloat(val float64, roundOn float64, places int) (newVal float64) {

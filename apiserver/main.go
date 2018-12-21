@@ -21,7 +21,7 @@ import (
 )
 
 // Version tag.
-var Version = "3.2"
+var Version = "3.4.1"
 
 // Run is the entrypoint for the freegeoip server.
 func Run() {
@@ -101,9 +101,12 @@ func runServer(c *Config, f http.Handler) {
 func runTLSServer(c *Config, f http.Handler) {
 	log.Println("freegeoip https server starting on", c.TLSServerAddr)
 	opts := listenerOpts(c)
+	if c.HTTP2 {
+		opts = append(opts, listener.HTTP2())
+	}
 	if c.LetsEncrypt {
 		if c.LetsEncryptHosts == "" {
-			log.Fatal("letsencrypt hosts not set")
+			log.Fatal("must set at least one host using --letsencrypt-hosts")
 		}
 		opts = append(opts, listener.LetsEncrypt(
 			c.LetsEncryptCacheDir,
@@ -124,6 +127,7 @@ func runTLSServer(c *Config, f http.Handler) {
 		WriteTimeout: c.WriteTimeout,
 		ErrorLog:     c.errorLogger(),
 		ConnState:    connStateMetrics("https"),
+		TLSConfig:    ln.TLSConfig(),
 	}
 	log.Fatal(srv.Serve(ln))
 }

@@ -1,11 +1,18 @@
-FROM golang:1.7
+FROM golang:1.9
 
 COPY cmd/freegeoip/public /var/www
 
 ADD . /go/src/github.com/healthteacher/freegeoip
-Add . "-use-x-forwarded-for"
-RUN cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && go get && go install
+ADD . "-use-x-forwarded-for"
+RUN \
+	cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && \
+	go get -d && go install && \
+	apt-get update && apt-get install -y libcap2-bin && \
+	setcap cap_net_bind_service=+ep /go/bin/freegeoip && \
+	apt-get clean && rm -rf /var/lib/apt/lists/* && \
+	useradd -ms /bin/bash freegeoip
 
+USER freegeoip
 ENTRYPOINT ["/go/bin/freegeoip"]
 
 EXPOSE 8080
