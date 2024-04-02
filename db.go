@@ -38,8 +38,9 @@ var (
 	//
 	// Old URL has been deprecated
 	// MaxMindDB = "http://geolite.maxmind.com/download/geoip/database/GeoLite2-City.mmdb.gz"
-	// Switching to open available DB in github
-	MaxMindDB = "https://git.io/GeoLite2-City.mmdb"
+	
+	// Switching to open available DB in https://github.com/wp-statistics/GeoLite2-City
+	MaxMindDB = "https://cdn.jsdelivr.net/npm/geolite2-city@1.0.0/GeoLite2-City.mmdb.gz"
 )
 
 // DB is the IP geolocation database.
