@@ -4,7 +4,8 @@ COPY cmd/freegeoip/public /var/www
 
 ADD . /go/src/github.com/healthteacher/freegeoip
 ADD . "-use-x-forwarded-for"
-RUN apt-get update && apt-get install -y libcap2-bin && apt-get clean
+RUN apt-get update
+# && apt-get install -y libcap2-bin && apt-get clean
 RUN \
 	cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && \
 	go get -d && go install && \
