@@ -1,3 +1,4 @@
 FROM fiorix/freegeoip:latest
 
-RUN sed -i 's/http\:\/\/geolite\.maxmind\.com\/download\/geoip\/database\/GeoLite2\-City\.mmdb\.gz/https\:\/\/cdn\.jsdelivr\.net\/npm\/geolite2\-city\@1\.0\.0\/GeoLite2\-City\.mmdb.gz/g' /go/src/github.com/fiorix/freegeoip/db.go
+RUN sed 's/http\:\/\/geolite\.maxmind\.com\/download\/geoip\/database\/GeoLite2\-City\.mmdb\.gz/https\:\/\/cdn\.jsdelivr\.net\/npm\/geolite2\-city\@1\.0\.0\/GeoLite2\-City\.mmdb.gz/g' /go/src/github.com/fiorix/freegeoip/db.go > /tmp/db.go && \
+    cp /tmp/db.go /go/src/github.com/fiorix/freegeoip/db.go
