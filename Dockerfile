@@ -5,11 +5,11 @@ COPY cmd/freegeoip/public /var/www
 ADD . /go/src/github.com/healthteacher/freegeoip
 ADD . "-use-x-forwarded-for"
 
-RUN echo "deb https://archive.debian.org/debian stretch main" >> /etc/apt/sources.list 
-RUN echo "deb-src https://archive.debian.org/debian stretch main" >> /etc/apt/sources.list 
-RUN echo "deb https://archive.debian.org/debian stretch-backports main" >> /etc/apt/sources.list 
-RUN echo "deb https://archive.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list 
-RUN echo "deb-src https://archive.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list
+RUN echo "deb http://archive.debian.org/debian stretch main" >> /etc/apt/sources.list 
+RUN echo "deb-src http://archive.debian.org/debian stretch main" >> /etc/apt/sources.list 
+RUN echo "deb http://archive.debian.org/debian stretch-backports main" >> /etc/apt/sources.list 
+RUN echo "deb http://archive.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list 
+RUN echo "deb-src http://archive.debian.org/debian-security stretch/updates main" >> /etc/apt/sources.list
 
 RUN apt-get update
 # && apt-get install -y libcap2-bin && apt-get clean
