@@ -9,14 +9,12 @@ RUN sed -i s/deb.debian.org/archive.debian.org/g /etc/apt/sources.list
 RUN sed -i s/security.debian.org/archive.debian.org/g /etc/apt/sources.list
 RUN sed -i s/stretch-updates/stretch/g /etc/apt/sources.list
 
-RUN apt-get update
-# && apt-get install -y libcap2-bin && apt-get clean
+RUN apt-get update && apt-get install -y libcap2-bin && apt-get clean
 RUN \
 	cd /go/src/github.com/healthteacher/freegeoip/cmd/freegeoip && \
 	go get -d && go install && \
-	apt-get update && apt-get install -y libcap2-bin && \
 	setcap cap_net_bind_service=+ep /go/bin/freegeoip && \
-	apt-get clean && rm -rf /var/lib/apt/lists/* && \
+	rm -rf /var/lib/apt/lists/* && \
 	useradd -ms /bin/bash freegeoip
 
 USER freegeoip
